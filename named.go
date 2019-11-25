@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode"
 
 	"github.com/jmoiron/sqlx/reflectx"
@@ -214,16 +215,36 @@ var (
 	EndBracketsReg = regexp.MustCompile(`\([^()]*\)\s*$`)
 )
 
-func fixBound(bound string, loop int) string {
+func fixBound(bound string, loop, bindType int) string {
 	endBrackets := EndBracketsReg.FindString(bound)
 	if endBrackets == "" {
 		return bound
 	}
+
 	var buffer bytes.Buffer
 	buffer.WriteString(bound)
-	for i := 0; i < loop-1; i++ {
-		buffer.WriteString(",")
-		buffer.WriteString(endBrackets)
+	if bindType == DOLLAR {
+		// For fixing: https://github.com/uber/cadence/issues/2863
+		numVars := strings.Count(endBrackets, "$")
+		curr := numVars
+		for i := 0; i < loop-1; i++ {
+			buffer.WriteString(", (")
+			for j := 0; j < numVars; j++ {
+				curr++
+				if j == 0 {
+					buffer.WriteString(fmt.Sprintf("$%v", curr))
+				} else {
+					buffer.WriteString(fmt.Sprintf(", $%v", curr))
+				}
+			}
+			buffer.WriteString(")")
+		}
+	} else {
+		for i := 0; i < loop-1; i++ {
+			buffer.WriteString(",")
+			buffer.WriteString(endBrackets)
+		}
+
 	}
 	return buffer.String()
 }
@@ -249,7 +270,7 @@ func bindArray(bindType int, query string, arg interface{}, m *reflectx.Mapper) 
 		arglist = append(arglist, elemArglist...)
 	}
 	if arrayLen > 1 {
-		bound = fixBound(bound, arrayLen)
+		bound = fixBound(bound, arrayLen, bindType)
 	}
 	return bound, arglist, nil
 }
