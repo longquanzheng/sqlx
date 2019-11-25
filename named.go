@@ -212,17 +212,24 @@ func bindStruct(bindType int, query string, arg interface{}, m *reflectx.Mapper)
 }
 
 var (
-	EndBracketsReg = regexp.MustCompile(`\([^()]*\)\s*$`)
+	EndBracketsReg = regexp.MustCompile(`\([^()]*\)\s*$|\([^()]*\)\s*ON CONFLICT`)
 )
 
-func fixBound(bound string, loop, bindType int) string {
+func fixBound(bound string, loop, bindType int) (string, error) {
 	endBrackets := EndBracketsReg.FindString(bound)
 	if endBrackets == "" {
-		return bound
+		return bound, nil
+	}
+	// bound needs to be split into two parts so that we can attach them back
+	ss := strings.Split(bound, endBrackets)
+	if len(ss) != 2 {
+		return "", fmt.Errorf("failed to split %v to two parts by %v", bound, endBrackets)
 	}
 
 	var buffer bytes.Buffer
-	buffer.WriteString(bound)
+	// write the first part
+	buffer.WriteString(ss[0])
+
 	if bindType == DOLLAR {
 		// For fixing: https://github.com/uber/cadence/issues/2863
 		numVars := strings.Count(endBrackets, "$")
@@ -246,7 +253,9 @@ func fixBound(bound string, loop, bindType int) string {
 		}
 
 	}
-	return buffer.String()
+	// write the second part
+	buffer.WriteString(ss[1])
+	return buffer.String(), nil
 }
 
 // bindArray binds a named parameter query with fields from an array or slice of
@@ -270,9 +279,9 @@ func bindArray(bindType int, query string, arg interface{}, m *reflectx.Mapper) 
 		arglist = append(arglist, elemArglist...)
 	}
 	if arrayLen > 1 {
-		bound = fixBound(bound, arrayLen, bindType)
+		bound, err = fixBound(bound, arrayLen, bindType)
 	}
-	return bound, arglist, nil
+	return bound, arglist, err
 }
 
 // bindMap binds a named parameter query with a map of arguments.
