@@ -211,8 +211,10 @@ func bindStruct(bindType int, query string, arg interface{}, m *reflectx.Mapper)
 	return bound, arglist, nil
 }
 
+const onConflict = "ON CONFLICT"
+
 var (
-	EndBracketsReg = regexp.MustCompile(`\([^()]*\)\s*$|\([^()]*\)\s*ON CONFLICT`)
+	EndBracketsReg = regexp.MustCompile(`\([^()]*\)\s*$|\([^()]*\)\s*` + onConflict)
 )
 
 func fixBound(bound string, loop, bindType int) (string, error) {
@@ -220,6 +222,8 @@ func fixBound(bound string, loop, bindType int) (string, error) {
 	if endBrackets == "" {
 		return bound, nil
 	}
+	isOnConflict := strings.Contains(bound, onConflict)
+
 	// bound needs to be split into two parts so that we can attach them back
 	ss := strings.Split(bound, endBrackets)
 	if len(ss) != 2 {
@@ -229,6 +233,17 @@ func fixBound(bound string, loop, bindType int) (string, error) {
 	var buffer bytes.Buffer
 	// write the first part
 	buffer.WriteString(ss[0])
+
+	// write the first value
+	if isOnConflict {
+		ss := strings.Split(endBrackets, onConflict)
+		if len(ss) != 2 {
+			return "", fmt.Errorf("failed to split %v to two parts by %v", endBrackets, onConflict)
+		}
+		buffer.WriteString(ss[0])
+	} else {
+		buffer.WriteString(endBrackets)
+	}
 
 	if bindType == DOLLAR {
 		// For fixing: https://github.com/uber/cadence/issues/2863
@@ -253,8 +268,13 @@ func fixBound(bound string, loop, bindType int) (string, error) {
 		}
 
 	}
-	// write the second part
-	buffer.WriteString(ss[1])
+
+	if isOnConflict {
+		// write the second part
+		buffer.WriteString(onConflict)
+		buffer.WriteString(ss[1])
+	}
+
 	return buffer.String(), nil
 }
 
